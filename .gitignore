@@ -1,0 +1,8 @@
+node_modules/
+dist/
+backend/target/
+backend/data/
+backend/.env
+.env
+frontend/run.log
+frontend/run-err.log
