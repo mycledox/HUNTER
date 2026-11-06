@@ -27,6 +27,38 @@ npm run dev
 Open the Vite URL printed in the terminal (normally `http://127.0.0.1:5173`).
 Vite proxies `/api` requests to the Spring Boot service at `127.0.0.1:8080`.
 
+## Run with Docker
+
+Requirements: Docker Desktop with Docker Compose enabled.
+
+From the project root, copy `.env.example` to `.env` if you want to configure
+the frontend port, OCR languages, or optional Azure OpenAI settings. Then run:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+```
+
+Open `http://localhost:5173`. The frontend container serves the built React app
+and proxies `/api` requests to the backend container. The backend image includes
+Tesseract with English and Hindi language data; set
+`HUNTER_TESSERACT_LANGUAGES=eng+hin` in `.env` to enable both. Database records
+and uploaded images persist in the `hunter-data` Docker volume across container
+restarts.
+
+Useful commands:
+
+```powershell
+docker compose ps
+docker compose logs -f
+docker compose down
+```
+
+`docker compose down` preserves the data volume. To permanently remove the
+stored database and uploaded images as well, run `docker compose down --volumes`.
+The app remains a local demo without authentication; do not expose it publicly
+or to an untrusted network.
+
 ## Implemented workflow
 
 - Scan a product barcode with a supported device camera or enter it manually. On explicit lookup, only the barcode is sent to Open Food Facts; its community-contributed product data must be checked against the package.

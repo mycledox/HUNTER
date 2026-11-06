@@ -1,0 +1,43 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      SERVER_ADDRESS: 0.0.0.0
+      PORT: 8080
+      DATABASE_URL: jdbc:h2:file:/app/data/hunter
+      HUNTER_STORAGE_DIR: /app/data/uploads
+      HUNTER_TESSERACT_PATH: tesseract
+      HUNTER_TESSERACT_LANGUAGES: ${HUNTER_TESSERACT_LANGUAGES:-eng}
+      HUNTER_AZURE_OPENAI_ENDPOINT: ${HUNTER_AZURE_OPENAI_ENDPOINT:-}
+      HUNTER_AZURE_OPENAI_KEY: ${HUNTER_AZURE_OPENAI_KEY:-}
+      HUNTER_AZURE_OPENAI_DEPLOYMENT: ${HUNTER_AZURE_OPENAI_DEPLOYMENT:-}
+    volumes:
+      - hunter-data:/app/data
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:${HUNTER_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  hunter-data:

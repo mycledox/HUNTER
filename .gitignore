@@ -4,5 +4,7 @@ backend/target/
 backend/data/
 backend/.env
 .env
+.env.*
+!.env.example
 frontend/run.log
 frontend/run-err.log
