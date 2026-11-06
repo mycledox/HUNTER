@@ -26,6 +26,26 @@ button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
 a { color: inherit; text-decoration: none; }
+.auth-page { min-height: 100vh; padding: 28px 18px; display: grid; place-items: center; background: radial-gradient(ellipse at 50% 20%, rgba(39, 133, 75, .18), transparent 55%), var(--bg); }
+.auth-card { width: min(100%, 440px); padding: 34px; border: 1px solid var(--line-strong); border-radius: 20px; background: linear-gradient(145deg, rgba(17, 34, 28, .98), rgba(10, 23, 19, .99)); box-shadow: 0 24px 80px #0005; }
+.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 36px; }
+.auth-brand > span:last-child { display: grid; gap: 4px; }
+.auth-brand strong { font: 800 17px/1 'Manrope', sans-serif; letter-spacing: .16em; }
+.auth-brand small { color: #82948a; font-size: 8px; letter-spacing: .12em; }
+.auth-card h1 { margin: 8px 0 10px; font: 700 25px/1.2 'Manrope', sans-serif; letter-spacing: -.03em; }
+.auth-intro { margin: 0 0 24px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.auth-form { display: grid; gap: 17px; }
+.auth-field { display: grid; gap: 7px; color: #c8d8ce; font-size: 11px; font-weight: 600; }
+.auth-field input { width: 100%; height: 42px; padding: 0 12px; border: 1px solid rgba(175, 225, 195, .16); border-radius: 9px; background: #07130f; color: var(--text); }
+.auth-field input:focus { border-color: var(--green); outline: 2px solid rgba(99, 243, 148, .18); }
+.auth-field small { color: var(--muted); font-size: 10px; font-weight: 400; }
+.auth-submit { width: 100%; min-height: 42px; margin-top: 3px; }
+.auth-submit:disabled { opacity: .65; cursor: wait; }
+.auth-error { padding: 10px 12px; border: 1px solid rgba(255, 119, 120, .3); border-radius: 8px; background: rgba(255, 119, 120, .08); color: #ffaaaa; font-size: 11px; line-height: 1.5; }
+.auth-switch { margin: 20px 0 0; color: var(--muted); text-align: center; font-size: 11px; }
+.auth-switch button { padding: 0; border: 0; background: transparent; color: var(--green); font-weight: 700; cursor: pointer; }
+.auth-security { margin: 24px 0 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted-2); text-align: center; font-size: 9px; line-height: 1.6; }
+.auth-loading { color: var(--muted); font-size: 13px; }
 .app-shell { min-height: 100vh; display: flex; }
 
 .sidebar {

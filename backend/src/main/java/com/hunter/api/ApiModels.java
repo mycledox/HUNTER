@@ -1,5 +1,6 @@
 package com.hunter.api;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -45,9 +46,9 @@ public final class ApiModels {
     ) {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record DecisionRequest(
             @NotBlank @Size(max = 32) String decision,
-            @NotBlank @Size(max = 140) String reviewerName,
             @Size(max = 2000) String reason
     ) {
     }

@@ -39,8 +39,9 @@ Copy-Item .env.example .env
 docker compose up --build -d
 ```
 
-Open `http://localhost:5173`. The frontend container serves the built React app
-and proxies `/api` requests to the backend container. The backend image includes
+Open `http://localhost:5173`, then create an account or sign in. The frontend
+container serves the built React app and proxies `/api` requests to the backend
+container. The backend image includes
 Tesseract with English and Hindi language data; set
 `HUNTER_TESSERACT_LANGUAGES=eng+hin` in `.env` to enable both. Database records
 and uploaded images persist in the `hunter-data` Docker volume across container
@@ -56,8 +57,13 @@ docker compose down
 
 `docker compose down` preserves the data volume. To permanently remove the
 stored database and uploaded images as well, run `docker compose down --volumes`.
-The app remains a local demo without authentication; do not expose it publicly
-or to an untrusted network.
+Sign-up requires a valid email address and a password of at least 12 characters.
+Passwords are stored as BCrypt hashes. The API uses server-managed sessions,
+CSRF tokens, and per-account review ownership; images and review history are
+only accessible to the signed-in owner. The session cookie is HTTP-only and
+SameSite=Lax. For an HTTPS deployment, set `SESSION_COOKIE_SECURE=true` in
+`.env` and terminate TLS at a trusted reverse proxy. The Docker Compose port
+remains bound to localhost by default.
 
 ## Implemented workflow
 
@@ -69,8 +75,10 @@ or to an untrusted network.
 - Review the image, label text, findings and their checklist version.
 - Record a reviewer decision and optional note; review history is persisted.
 - Find stored reviews and download or remove a review through the API.
-- Persist demo users, versioned checklist prompts, review records, findings and
+- Persist account records, versioned checklist prompts, review records, findings and
   reviewer decision history in a relational H2 database.
+- Create accounts with email and password, sign in/out with server-side sessions,
+  and keep each account's reviews and uploaded images private to that account.
 - Save uploaded image files with random storage names outside the Vite public
   folder. Uploads are restricted to readable PNG/JPEG images with safe size and
   dimension limits.
@@ -156,14 +164,20 @@ Azure OpenAI is used only for optional reviewer suggestions. None of these
 sources or services is accuracy-verified. Run OCR and product lookup checks
 against representative, permitted samples before use.
 
-## Development-only security boundary
+## Security boundary
 
-The API binds to `127.0.0.1`; CORS is restricted to the local Vite origin. This
-prototype has no authentication or per-user authorization. Do not bind it to a
-public interface or expose it to a network. Before deployment, add authenticated
-identity, review ownership and role checks, CSRF/transport protections,
-retention/deletion policies, production database migrations, and secured file
-storage.
+The API requires an authenticated session for review, image, OCR, barcode, and
+AI endpoints. Passwords are BCrypt-hashed; session cookies are HTTP-only and
+SameSite=Lax, state-changing requests require CSRF tokens, and review access is
+scoped to the signed-in owner. Local development binds the API to loopback and
+restricts cross-origin access to the Vite development origins. Docker publishes
+the frontend only on `127.0.0.1` by default.
+
+Before a public production deployment, use HTTPS and set
+`SESSION_COOKIE_SECURE=true`; add account recovery and email verification,
+login/signup rate limiting, production database migrations and backups,
+retention/deletion policies, and secured file storage. Do not expose the app
+directly without a trusted TLS-terminating reverse proxy.
 
 Local database files and uploaded images are written under `backend/data/`,
 which is ignored by Git. Deleting a review through the API removes its image

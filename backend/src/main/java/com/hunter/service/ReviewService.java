@@ -7,7 +7,6 @@ import com.hunter.model.Review;
 import com.hunter.model.ReviewDecision;
 import com.hunter.model.ReviewFinding;
 import com.hunter.repository.ChecklistRuleRepository;
-import com.hunter.repository.DemoUserRepository;
 import com.hunter.repository.ReviewRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,24 +32,22 @@ public class ReviewService {
     public static final String DEFAULT_CATEGORY = "packaged-snacks";
     private final ReviewRepository reviews;
     private final ChecklistRuleRepository rules;
-    private final DemoUserRepository users;
     private final UploadStorageService storage;
     private final ReviewRulesService reviewRules;
 
-    public ReviewService(ReviewRepository reviews, ChecklistRuleRepository rules, DemoUserRepository users,
+    public ReviewService(ReviewRepository reviews, ChecklistRuleRepository rules,
                          UploadStorageService storage, ReviewRulesService reviewRules) {
         this.reviews = reviews;
         this.rules = rules;
-        this.users = users;
         this.storage = storage;
         this.reviewRules = reviewRules;
     }
 
     @Transactional(readOnly = true)
-    public List<ApiModels.ReviewResponse> list(String search, String status) {
+    public List<ApiModels.ReviewResponse> list(String search, String status, DemoUser owner) {
         String normalizedSearch = search == null ? "" : search.strip().toLowerCase(Locale.ROOT);
         String normalizedStatus = status == null ? "" : status.strip().toUpperCase(Locale.ROOT);
-        return reviews.findAllByOrderByCreatedAtDesc().stream()
+        return reviews.findAllByOwner_IdOrderByCreatedAtDesc(owner.getId()).stream()
                 .filter(review -> normalizedSearch.isEmpty()
                         || review.getProductName().toLowerCase(Locale.ROOT).contains(normalizedSearch)
                         || review.getCategory().toLowerCase(Locale.ROOT).contains(normalizedSearch))
@@ -60,13 +57,13 @@ public class ReviewService {
     }
 
     @Transactional(readOnly = true)
-    public ApiModels.ReviewResponse get(String id) {
-        return toResponse(findDetailed(id));
+    public ApiModels.ReviewResponse get(String id, DemoUser owner) {
+        return toResponse(findDetailed(id, owner));
     }
 
     @Transactional
     public ApiModels.ReviewResponse create(MultipartFile image, String productName, String category,
-                                           String labelText, String approvedFacts) throws java.io.IOException {
+                                           String labelText, String approvedFacts, DemoUser owner) throws java.io.IOException {
         String normalizedProductName = normalizeRequired(productName, "Enter a product name.", 120);
         String normalizedCategory = normalizeRequired(category, "Choose a product category.", 60);
         if (!DEFAULT_CATEGORY.equals(normalizedCategory)) {
@@ -86,8 +83,6 @@ public class ReviewService {
 
         UploadStorageService.StoredImage storedImage = storage.store(image);
         try {
-            DemoUser owner = users.findByUsername("demo-reviewer")
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "The local reviewer account is not configured."));
             Instant now = Instant.now();
             Review review = new Review(
                     normalizedProductName,
@@ -114,25 +109,20 @@ public class ReviewService {
     }
 
     @Transactional
-    public ApiModels.ReviewResponse decide(String id, ApiModels.DecisionRequest request) {
+    public ApiModels.ReviewResponse decide(String id, ApiModels.DecisionRequest request, DemoUser owner) {
         if (request == null || request.decision() == null || request.decision().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A reviewer decision is required. Choose APPROVED or NEEDS_CHANGES.");
-        }
-        if (request.reviewerName() == null || request.reviewerName().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A reviewer name is required to record the decision.");
         }
         String decision = request.decision().strip().toUpperCase(Locale.ROOT);
         if (!List.of("APPROVED", "NEEDS_CHANGES").contains(decision)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose APPROVED or NEEDS_CHANGES.");
         }
-        Review review = findDetailed(id);
-        DemoUser reviewer = users.findByUsername("demo-reviewer")
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "The local reviewer account is not configured."));
+        Review review = findDetailed(id, owner);
         review.addDecision(new ReviewDecision(
                 review,
-                reviewer,
+                owner,
                 decision,
-                request.reviewerName().strip(),
+                owner.getDisplayName(),
                 review.getChecklistVersion(),
                 normalizeOptional(request.reason(), 2000),
                 Instant.now()
@@ -141,8 +131,8 @@ public class ReviewService {
     }
 
     @Transactional
-    public String delete(String id) {
-        Review review = findDetailed(id);
+    public String delete(String id, DemoUser owner) {
+        Review review = findDetailed(id, owner);
         String storageKey = review.getImageStorageKey();
         reviews.delete(review);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -161,11 +151,11 @@ public class ReviewService {
         return review.getProductName();
     }
 
-    private Review findDetailed(String id) {
+    private Review findDetailed(String id, DemoUser owner) {
         if (id == null || !id.matches("[a-f0-9-]{36}")) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Review not found.");
         }
-        return reviews.findDetailedById(id)
+        return reviews.findDetailedByIdAndOwner_Id(id, owner.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Review not found."));
     }
 

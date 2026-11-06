@@ -10,8 +10,10 @@ import java.util.Optional;
 public interface ReviewRepository extends JpaRepository<Review, String> {
 
     @EntityGraph(attributePaths = {"owner"})
-    List<Review> findAllByOrderByCreatedAtDesc();
+    List<Review> findAllByOwner_IdOrderByCreatedAtDesc(String ownerId);
 
     @EntityGraph(attributePaths = {"owner", "findings"})
-    Optional<Review> findDetailedById(String id);
+    Optional<Review> findDetailedByIdAndOwner_Id(String id, String ownerId);
+
+    Optional<Review> findByIdAndOwner_Id(String id, String ownerId);
 }

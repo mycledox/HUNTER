@@ -1,6 +1,7 @@
 package com.hunter.api;
 
 import com.hunter.model.ChecklistRule;
+import com.hunter.model.DemoUser;
 import com.hunter.repository.ChecklistRuleRepository;
 import com.hunter.repository.DemoUserRepository;
 import com.hunter.repository.ReviewRepository;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
@@ -74,22 +76,9 @@ public class ReviewController {
                 localOcr.capability(),
                 aiConfigured ? "CONFIGURED" : "NEEDS_CONFIGURATION",
                 aiConfigured,
-                false,
-                "Development only. Bind to localhost; do not expose this API without authentication and ownership checks."
+                true,
+                "Local sessions and review ownership checks are enabled. Use HTTPS and secure production storage before deployment."
         );
-    }
-
-    @GetMapping("/users")
-    public List<ApiModels.UserResponse> users() {
-        return users.findAll().stream()
-                .map(user -> new ApiModels.UserResponse(
-                        user.getId(),
-                        user.getUsername(),
-                        user.getDisplayName(),
-                        user.getRole(),
-                        user.getWorkspaceName()
-                ))
-                .toList();
     }
 
     @GetMapping("/rules")
@@ -102,9 +91,10 @@ public class ReviewController {
     @GetMapping("/reviews")
     public List<ApiModels.ReviewResponse> reviews(
             @RequestParam(required = false) String search,
-            @RequestParam(required = false) String status
+            @RequestParam(required = false) String status,
+            Authentication authentication
     ) {
-        return reviewService.list(search, status);
+        return reviewService.list(search, status, currentUser(authentication));
     }
 
     @PostMapping(value = "/reviews", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -113,10 +103,11 @@ public class ReviewController {
             @RequestParam String productName,
             @RequestParam String category,
             @RequestParam String labelText,
-            @RequestParam(defaultValue = "") String approvedFacts
+            @RequestParam(defaultValue = "") String approvedFacts,
+            Authentication authentication
     ) throws IOException {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(reviewService.create(image, productName, category, labelText, approvedFacts));
+                .body(reviewService.create(image, productName, category, labelText, approvedFacts, currentUser(authentication)));
     }
 
     @PostMapping(value = "/ocr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -146,13 +137,13 @@ public class ReviewController {
     }
 
     @GetMapping("/reviews/{id}")
-    public ApiModels.ReviewResponse review(@PathVariable String id) {
-        return reviewService.get(id);
+    public ApiModels.ReviewResponse review(@PathVariable String id, Authentication authentication) {
+        return reviewService.get(id, currentUser(authentication));
     }
 
     @GetMapping("/reviews/{id}/image")
-    public ResponseEntity<ByteArrayResource> image(@PathVariable String id) throws IOException {
-        var review = reviewRepository.findById(id)
+    public ResponseEntity<ByteArrayResource> image(@PathVariable String id, Authentication authentication) throws IOException {
+        var review = reviewRepository.findByIdAndOwner_Id(id, currentUser(authentication).getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Review not found."));
         var imagePath = storage.resolveStorageKey(review.getImageStorageKey());
         if (!Files.isRegularFile(imagePath)) {
@@ -172,15 +163,21 @@ public class ReviewController {
     @PostMapping("/reviews/{id}/decisions")
     public ApiModels.ReviewResponse decide(
             @PathVariable String id,
-            @Valid @RequestBody ApiModels.DecisionRequest request
+            @Valid @RequestBody ApiModels.DecisionRequest request,
+            Authentication authentication
     ) {
-        return reviewService.decide(id, request);
+        return reviewService.decide(id, request, currentUser(authentication));
     }
 
     @DeleteMapping("/reviews/{id}")
-    public ResponseEntity<Void> deleteReview(@PathVariable String id) {
-        reviewService.delete(id);
+    public ResponseEntity<Void> deleteReview(@PathVariable String id, Authentication authentication) {
+        reviewService.delete(id, currentUser(authentication));
         return ResponseEntity.noContent().build();
+    }
+
+    private DemoUser currentUser(Authentication authentication) {
+        return users.findByUsername(authentication.getName())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated account not found."));
     }
 
     private static ApiModels.RuleResponse toRuleResponse(ChecklistRule rule) {

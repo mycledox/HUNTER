@@ -184,14 +184,41 @@ function ProductDetailsStatus({ product }) {
   );
 }
 
+function AuthScreen({ mode, onModeChange, onSubmit, busy, error }) {
+  const signingUp = mode === 'signup';
+  return (
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="auth-brand"><Logo /><span><strong>HUNTER</strong><small>LABEL REVIEW WORKSPACE</small></span></div>
+        <div className="eyebrow">{signingUp ? 'Create your workspace account' : 'Welcome back'}</div>
+        <h1>{signingUp ? 'Create your account' : 'Sign in to HUNTER'}</h1>
+        <p className="auth-intro">Your reviews are private to your account. Sign in to continue to the label review workspace.</p>
+        <form className="auth-form" onSubmit={onSubmit}>
+          {signingUp && <label className="auth-field">Full name<input name="displayName" type="text" autoComplete="name" maxLength={140} required /></label>}
+          <label className="auth-field">Email address<input name="email" type="email" autoComplete="email" maxLength={80} required /></label>
+          <label className="auth-field">Password<input name="password" type="password" autoComplete={signingUp ? 'new-password' : 'current-password'} minLength={signingUp ? 12 : undefined} maxLength={72} required /><small>{signingUp ? 'Use at least 12 characters.' : 'Your password is case-sensitive.'}</small></label>
+          {error && <div className="auth-error" role="alert">{error}</div>}
+          <button className="button button-primary auth-submit" type="submit" disabled={busy}>{busy ? 'Please wait…' : signingUp ? 'Create account' : 'Sign in'}</button>
+        </form>
+        <p className="auth-switch">{signingUp ? 'Already have an account?' : 'New to HUNTER?'} <button type="button" onClick={() => onModeChange(signingUp ? 'login' : 'signup')}>{signingUp ? 'Sign in' : 'Create an account'}</button></p>
+        <p className="auth-security">Passwords are stored as one-way hashes. Sessions use secure, server-managed cookies.</p>
+      </section>
+    </main>
+  );
+}
+
 function App() {
   const [page, setPage] = useState('dashboard');
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authMode, setAuthMode] = useState('login');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [reviews, setReviews] = useState([]);
   const [rules, setRules] = useState([]);
-  const [users, setUsers] = useState([]);
   const [capabilities, setCapabilities] = useState(null);
   const [backendError, setBackendError] = useState('');
   const [notice, setNotice] = useState('');
@@ -227,12 +254,30 @@ function App() {
   const request = async (path, options = {}) => {
     let response;
     try {
-      response = await fetch(`/api${path}`, options);
+      const method = (options.method || 'GET').toUpperCase();
+      const headers = new Headers(options.headers || {});
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const csrfResponse = await fetch('/api/auth/csrf', { credentials: 'same-origin' });
+        if (!csrfResponse.ok) throw new Error('Could not establish a secure session. Refresh and try again.');
+        const csrf = await csrfResponse.json();
+        headers.set('X-XSRF-TOKEN', csrf.token);
+      }
+      response = await fetch(`/api${path}`, {
+        ...options,
+        headers,
+        credentials: 'same-origin'
+      });
     } catch (error) {
-      throw new Error('The review API is unavailable. Start the Spring Boot backend and try again.');
+      throw new Error(error.message || 'The review API is unavailable. Start the Spring Boot backend and try again.');
     }
     if (!response.ok) {
       const problem = await response.json().catch(() => null);
+      if (response.status === 401 && !['/auth/login', '/auth/signup', '/auth/me'].includes(path)) {
+        setUser(null);
+        setReviews([]);
+        setSelectedReview(null);
+        setAuthMode('login');
+      }
       if (path.startsWith('/products/barcode/')) {
         if (response.status === 400) {
           throw new Error('Enter a valid product barcode and try again.');
@@ -244,53 +289,97 @@ function App() {
           throw new Error(problem?.detail || problem?.message || 'Product lookup is unavailable. Check your internet connection or enter product details manually.');
         }
       }
-      throw new Error(problem?.detail || problem?.message || (
+      const error = new Error(problem?.detail || problem?.message || (
         response.status >= 500
           ? 'The review API returned an error. Confirm Spring Boot is running at 127.0.0.1:8080.'
           : `Request failed (${response.status}).`
       ));
+      error.status = response.status;
+      throw error;
     }
     return response.status === 204 ? null : response.json();
   };
 
   const refresh = async () => {
-    const [reviewResult, ruleResult, userResult, capabilityResult] = await Promise.all([
+    const [reviewResult, ruleResult, capabilityResult] = await Promise.all([
       request('/reviews'),
       request('/rules'),
-      request('/users'),
       request('/capabilities')
     ]);
     setReviews(reviewResult);
     setRules(ruleResult);
-    setUsers(userResult);
     setCapabilities(capabilityResult);
     setBackendError('');
   };
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      request('/reviews'),
-      request('/rules'),
-      request('/users'),
-      request('/capabilities')
-    ])
-      .then(([reviewResult, ruleResult, userResult, capabilityResult]) => {
+    request('/auth/me')
+      .then(account => {
         if (!active) return;
-        setReviews(reviewResult);
-        setRules(ruleResult);
-        setUsers(userResult);
-        setCapabilities(capabilityResult);
-        setBackendError('');
+        setUser(account);
+        return refresh();
       })
       .catch(error => {
-        if (active) setBackendError(error.message);
+        if (!active) return;
+        if (error.status !== 401) setBackendError(error.message);
+      })
+      .finally(() => {
+        if (active) setAuthChecked(true);
       });
     return () => {
       active = false;
       window.clearTimeout(toastTimer.current);
     };
   }, []);
+
+  const handleAuthSubmit = async event => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const values = {
+      email: String(form.get('email') || '').trim(),
+      password: String(form.get('password') || '')
+    };
+    setAuthBusy(true);
+    setAuthError('');
+    try {
+      if (authMode === 'signup') {
+        values.displayName = String(form.get('displayName') || '').trim();
+        await request('/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(values)
+        });
+      }
+      const account = await request('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: values.email, password: values.password })
+      });
+      await refresh();
+      setUser(account);
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await request('/auth/logout', { method: 'POST' });
+      setUser(null);
+      setReviews([]);
+      setSelectedReview(null);
+      setUpload(null);
+      setUploadPreview('');
+      setAiSuggestion('');
+      setProfileOpen(false);
+      setAuthMode('login');
+    } catch (error) {
+      notify(error.message);
+    }
+  };
 
   useEffect(() => {
     if (!upload) {
@@ -479,7 +568,6 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           decision,
-          reviewerName: users[0]?.displayName || 'Local demo reviewer',
           reason: decisionReason.trim()
         })
       });
@@ -706,12 +794,12 @@ function App() {
     <>
       <div className="page-intro"><div><div className="eyebrow">Workspace preferences</div><h1>Settings</h1><p>Data storage, provider configuration, and reviewer details.</p></div></div>
       <div className="settings-grid"><section className="panel settings-card"><h3>Privacy &amp; services</h3>
-        <SettingRow title="Image storage" detail="Backend-controlled local file storage. Keep the service on localhost until authentication and access control are configured." badge="LOCAL" />
+        <SettingRow title="Image storage" detail="Backend-controlled local file storage. Reviews and images are restricted to their signed-in owner." badge="OWNER ONLY" />
         <SettingRow title="Text extraction (OCR)" detail={capabilities?.ocr?.message || 'Local Tesseract OCR status is not available until the API starts.'} badge={capabilities?.ocr?.status || 'UNKNOWN'} />
         <SettingRow title="Optional AI explanations" detail={capabilities?.ai === 'CONFIGURED' ? 'Azure OpenAI is configured. Label text and facts are sent only after the reviewer opts in.' : 'Azure OpenAI needs an endpoint, key, and deployment name in the API environment.'} badge={capabilities?.ai || 'UNKNOWN'} />
         <SettingRow title="External data transfer" detail="When you choose Find product, only the barcode is sent to Open Food Facts. OCR remains local. Review text is sent to Azure OpenAI only after separate consent and request." badge="BARCODE · ON REQUEST" />
         <SettingRow title="Official checklist source" detail="Current official FSSAI material must be selected and reviewed by the team." badge="PENDING" />
-      </section><section className="panel settings-card"><h3>Demo reviewer</h3>{users.length ? users.map(user => <SettingRow key={user.id} title={user.displayName} detail={`Role: ${user.role} · workspace: ${user.workspaceName || 'HUNTER demo'}`} badge="LOCAL USER" />) : <p className="field-hint">The backend will create a local demo reviewer on first start.</p>}<SettingRow title="Deployment boundary" detail="Development configuration binds to localhost. Add authentication, ownership checks, TLS, and production storage controls before exposing this service." badge="DEV ONLY" /></section></div>
+      </section><section className="panel settings-card"><h3>Your account</h3><SettingRow title={user.displayName} detail={user.username} badge={user.role} /><SettingRow title="Workspace" detail={user.workspaceName} badge="PRIVATE" /><SettingRow title="Deployment boundary" detail="Use HTTPS in production and set SESSION_COOKIE_SECURE=true. The app still needs a production database, backups, and operational monitoring before public launch." badge="SECURE DEPLOYMENT REQUIRED" /></section></div>
     </>
   );
 
@@ -724,13 +812,20 @@ function App() {
           ['02', 'Scan barcode and capture label', 'A requested Open Food Facts lookup uses only the barcode. The Spring Boot API validates the package image before storing it locally.'],
           ['03', 'Extract and verify text', 'Optional Tesseract OCR runs on this computer; the reviewer corrects every line against the uploaded package.'],
           ['04', 'Run deterministic checks', 'Versioned prompts compare field cues and on-pack claims against approved facts. They do not determine legality.'],
-          ['05', 'Record reviewer decisions', 'Authorized human review, reviewer name, decision, reason, and checklist version are persisted.'],
+          ['05', 'Record reviewer decisions', 'Your signed-in account is recorded as reviewer along with the decision, reason, and checklist version.'],
           ['06', 'Record any decision', 'A human reviewer records the outcome. It is not a legal or compliance certification.']
         ].map(([number, title, description]) => <article className="panel help-card" key={number}><span className="help-icon">{number}</span><h3>{title}</h3><p>{description}</p></article>)}
       </div>
       <section className="panel rule-footer"><strong>Source and service policy</strong><p>Use current FSSAI regulations and amendments selected and reviewed by the team. These sample prompts are not an official checklist. Tesseract OCR runs locally. Optional Azure OpenAI suggestions require local configuration and an explicit reviewer request.</p><a className="reference-link" href="https://www.fssai.gov.in/docs/food-law/regulations/Comp_Labelling%20Display_Version%20VIII_09_09_2025.pdf" target="_blank" rel="noreferrer">FSSAI Labelling &amp; Display compendium (9 Sep 2025) ↗</a><a className="reference-link" href="https://www.fssai.gov.in/food-law/regulations/amendments/labelling-display" target="_blank" rel="noreferrer">Check FSSAI amendments ↗</a></section>
     </>
   );
+
+  if (!authChecked) {
+    return <main className="auth-page"><p className="auth-loading">Checking your secure session…</p></main>;
+  }
+  if (!user) {
+    return <AuthScreen mode={authMode} onModeChange={mode => { setAuthMode(mode); setAuthError(''); }} onSubmit={handleAuthSubmit} busy={authBusy} error={authError || backendError} />;
+  }
 
   const content = {
     dashboard: renderDashboard,
@@ -759,7 +854,7 @@ function App() {
           <button className="mobile-menu icon-button" type="button" aria-label="Open navigation" onClick={() => setMobileOpen(open => !open)}>☰</button>
           <label className="search-box"><span aria-hidden="true">⌕</span><input id="global-search" type="search" placeholder="Search any product…" value={query} onChange={event => setQuery(event.target.value)} aria-label="Search reviews and products" /><kbd>⌘ K</kbd></label>
           <button className="icon-button notification-button" type="button" aria-label="Notifications" onClick={() => notify('You’re all caught up. Notifications are not connected in this demo.')}><span aria-hidden="true">♧</span><i /></button>
-          <div className="profile-wrap"><button className="profile-button" type="button" onClick={() => setProfileOpen(open => !open)} aria-expanded={profileOpen}><span className="avatar">A</span><span className="profile-name">{users[0]?.displayName || 'Demo Reviewer'}</span><span className="profile-chevron">⌄</span></button>{profileOpen && <div className="profile-menu"><span className="profile-menu-label">DEMO WORKSPACE</span><button type="button" onClick={() => navigate('settings')}>Workspace settings</button><button type="button" onClick={() => navigate('help')}>Help &amp; support</button></div>}</div>
+          <div className="profile-wrap"><button className="profile-button" type="button" onClick={() => setProfileOpen(open => !open)} aria-expanded={profileOpen}><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><span className="profile-name">{user.displayName}</span><span className="profile-chevron">⌄</span></button>{profileOpen && <div className="profile-menu"><span className="profile-menu-label">{user.username}</span><button type="button" onClick={() => navigate('settings')}>Account settings</button><button type="button" onClick={() => navigate('help')}>Help &amp; support</button><button type="button" onClick={handleLogout}>Sign out</button></div>}</div>
         </header>
         <section className="page-view" key={page} aria-live="polite">{content}</section>
       </main>

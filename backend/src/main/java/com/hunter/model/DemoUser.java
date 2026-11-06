@@ -20,6 +20,9 @@ public class DemoUser {
     @Column(nullable = false, length = 140)
     private String displayName;
 
+    @Column(length = 100)
+    private String passwordHash;
+
     @Column(nullable = false, length = 40)
     private String role;
 
@@ -33,9 +36,15 @@ public class DemoUser {
     }
 
     public DemoUser(String id, String username, String displayName, String role, String workspaceName, Instant createdAt) {
+        this(id, username, displayName, null, role, workspaceName, createdAt);
+    }
+
+    public DemoUser(String id, String username, String displayName, String passwordHash,
+                    String role, String workspaceName, Instant createdAt) {
         this.id = id;
         this.username = username;
         this.displayName = displayName;
+        this.passwordHash = passwordHash;
         this.role = role;
         this.workspaceName = workspaceName;
         this.createdAt = createdAt;
@@ -44,6 +53,7 @@ public class DemoUser {
     public String getId() { return id; }
     public String getUsername() { return username; }
     public String getDisplayName() { return displayName; }
+    public String getPasswordHash() { return passwordHash; }
     public String getRole() { return role; }
     public String getWorkspaceName() { return workspaceName; }
     public Instant getCreatedAt() { return createdAt; }

@@ -5,6 +5,7 @@ services:
     environment:
       SERVER_ADDRESS: 0.0.0.0
       PORT: 8080
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       DATABASE_URL: jdbc:h2:file:/app/data/hunter
       HUNTER_STORAGE_DIR: /app/data/uploads
       HUNTER_TESSERACT_PATH: tesseract

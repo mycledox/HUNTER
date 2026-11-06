@@ -5,7 +5,6 @@ import com.hunter.model.ChecklistRule;
 import com.hunter.model.DemoUser;
 import com.hunter.model.Review;
 import com.hunter.repository.ChecklistRuleRepository;
-import com.hunter.repository.DemoUserRepository;
 import com.hunter.repository.ReviewRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,7 +18,6 @@ import java.io.ByteArrayOutputStream;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,11 +33,8 @@ import static org.mockito.Mockito.when;
 
 class ReviewServiceTest {
 
-    private static final String REVIEWER = "demo-reviewer";
-
     private ReviewRepository reviews;
     private ChecklistRuleRepository rules;
-    private DemoUserRepository users;
     private UploadStorageService storage;
     private ReviewRulesService reviewRules;
     private ReviewService service;
@@ -51,14 +46,13 @@ class ReviewServiceTest {
     void setUp() throws Exception {
         reviews = mock(ReviewRepository.class);
         rules = mock(ChecklistRuleRepository.class);
-        users = mock(DemoUserRepository.class);
         storage = new UploadStorageService(tempDir.toString());
         reviewRules = mock(ReviewRulesService.class);
-        service = new ReviewService(reviews, rules, users, storage, reviewRules);
+        service = new ReviewService(reviews, rules, storage, reviewRules);
     }
 
     private DemoUser demoUser() {
-        return new DemoUser("user-1", REVIEWER, "Demo Reviewer", "REVIEWER", "Hunter Demo", Instant.now());
+        return new DemoUser("user-1", "demo@example.test", "Demo Reviewer", "REVIEWER", "Hunter Demo", Instant.now());
     }
 
     private MockMultipartFile pngUpload() throws Exception {
@@ -75,14 +69,14 @@ class ReviewServiceTest {
 
     @Test
     void rejectsMissingProductName() throws Exception {
-        assertThatThrownBy(() -> service.create(pngUpload(), "  ", "packaged-snacks", "Some text", ""))
+        assertThatThrownBy(() -> service.create(pngUpload(), "  ", "packaged-snacks", "Some text", "", demoUser()))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Enter a product name");
     }
 
     @Test
     void rejectsUnsupportedCategory() throws Exception {
-        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "beverages", "Some text", ""))
+        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "beverages", "Some text", "", demoUser()))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("packaged-snacks");
         verify(rules, never()).findByEnabledTrueAndCategoryInOrderBySortOrderAsc(anyList());
@@ -90,7 +84,7 @@ class ReviewServiceTest {
 
     @Test
     void rejectsMissingLabelText() throws Exception {
-        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", null, ""))
+        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", null, "", demoUser()))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("label text");
     }
@@ -98,7 +92,7 @@ class ReviewServiceTest {
     @Test
     void rejectsFieldExceedingLength() throws Exception {
         String tooLong = "x".repeat(30001);
-        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", tooLong, ""))
+        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", tooLong, "", demoUser()))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("exceeds its supported length");
     }
@@ -108,10 +102,9 @@ class ReviewServiceTest {
         MockMultipartFile upload = pngUpload();
         when(rules.findByEnabledTrueAndCategoryInOrderBySortOrderAsc(anyList()))
                 .thenReturn(List.of(rule("demo-v0.1"), rule("demo-v0.3"), rule("demo-v0.7")));
-        when(users.findByUsername(REVIEWER)).thenReturn(Optional.of(demoUser()));
         when(reviews.save(any(Review.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        ApiModels.ReviewResponse response = service.create(upload, "Chips", "packaged-snacks", "Label text", "");
+        ApiModels.ReviewResponse response = service.create(upload, "Chips", "packaged-snacks", "Label text", "", demoUser());
 
         assertThat(response.checklistVersion()).isEqualTo("demo-v0.7");
         @SuppressWarnings("unchecked")
@@ -124,31 +117,31 @@ class ReviewServiceTest {
     void rejectsWhenNoRulesAvailable() throws Exception {
         when(rules.findByEnabledTrueAndCategoryInOrderBySortOrderAsc(anyList())).thenReturn(List.of());
 
-        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", "Text", ""))
+        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", "Text", "", demoUser()))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("No checklist version");
     }
 
     @Test
-    void rejectsWhenReviewerAccountMissing() throws Exception {
+    void createsReviewForAuthenticatedOwner() throws Exception {
         when(rules.findByEnabledTrueAndCategoryInOrderBySortOrderAsc(anyList()))
                 .thenReturn(List.of(rule("demo-v0.1")));
-        when(users.findByUsername(REVIEWER)).thenReturn(Optional.empty());
+        when(reviews.save(any(Review.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", "Text", ""))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("reviewer account");
+        service.create(pngUpload(), "Chips", "packaged-snacks", "Text", "", demoUser());
+
+        verify(reviews).save(org.mockito.ArgumentMatchers.argThat(review ->
+                review.getOwner().getId().equals(demoUser().getId())));
     }
 
     @Test
     void deletesStoredImageWhenRuleEvaluationFails() throws Exception {
         when(rules.findByEnabledTrueAndCategoryInOrderBySortOrderAsc(anyList()))
                 .thenReturn(List.of(rule("demo-v0.1")));
-        when(users.findByUsername(REVIEWER)).thenReturn(Optional.of(demoUser()));
         org.mockito.Mockito.doThrow(new IllegalStateException("rule engine failed"))
                 .when(reviewRules).evaluate(any(Review.class), anyList());
 
-        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", "Text", ""))
+        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", "Text", "", demoUser()))
                 .isInstanceOf(IllegalStateException.class);
 
         try (var files = java.nio.file.Files.list(tempDir)) {
@@ -158,29 +151,13 @@ class ReviewServiceTest {
     }
 
     @Test
-    void deletesStoredImageWhenOwnerLookupFails() throws Exception {
-        when(rules.findByEnabledTrueAndCategoryInOrderBySortOrderAsc(anyList()))
-                .thenReturn(List.of(rule("demo-v0.1")));
-        when(users.findByUsername(REVIEWER))
-                .thenThrow(new ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
-
-        assertThatThrownBy(() -> service.create(pngUpload(), "Chips", "packaged-snacks", "Text", ""))
-                .isInstanceOf(ResponseStatusException.class);
-
-        try (var files = java.nio.file.Files.list(tempDir)) {
-            assertThat(files.toList()).isEmpty();
-        }
-    }
-
-    @Test
     void decideAcceptsOnlyKnownDecisions() {
         Review review = new Review("Chips", "packaged-snacks", "label.png", "key.jpg", "image/jpeg",
                 "text", "", "demo-v0.1", demoUser(), Instant.now());
-        when(reviews.findDetailedById(anyString())).thenReturn(Optional.of(review));
-        when(users.findByUsername(REVIEWER)).thenReturn(Optional.of(demoUser()));
+        when(reviews.findDetailedByIdAndOwner_Id(anyString(), anyString())).thenReturn(java.util.Optional.of(review));
 
         assertThatThrownBy(() -> service.decide(review.getId(),
-                new ApiModels.DecisionRequest("REJECTED", "Reviewer", "")))
+                new ApiModels.DecisionRequest("REJECTED", ""), demoUser()))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("APPROVED or NEEDS_CHANGES");
         verify(reviews, never()).save(any(Review.class));
@@ -190,22 +167,22 @@ class ReviewServiceTest {
     void decideRecordsDecisionAndUpdatesStatus() {
         Review review = new Review("Chips", "packaged-snacks", "label.png", "key.jpg", "image/jpeg",
                 "text", "", "demo-v0.1", demoUser(), Instant.now());
-        when(reviews.findDetailedById(anyString())).thenReturn(Optional.of(review));
-        when(users.findByUsername(REVIEWER)).thenReturn(Optional.of(demoUser()));
+        when(reviews.findDetailedByIdAndOwner_Id(anyString(), anyString())).thenReturn(java.util.Optional.of(review));
         when(reviews.save(any(Review.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ApiModels.ReviewResponse response = service.decide(review.getId(),
-                new ApiModels.DecisionRequest("approved", "Reviewer", "looks fine"));
+                new ApiModels.DecisionRequest("approved", "looks fine"), demoUser());
 
         assertThat(response.status()).isEqualTo("APPROVED");
         assertThat(response.decisions()).hasSize(1);
+        assertThat(response.decisions().get(0).reviewerName()).isEqualTo("Demo Reviewer");
         assertThat(response.decisions().get(0).reason()).isEqualTo("looks fine");
     }
 
     @Test
     void decideRejectsUnknownReviewId() {
         assertThatThrownBy(() -> service.decide("not-a-uuid",
-                new ApiModels.DecisionRequest("APPROVED", "Reviewer", "")))
+                new ApiModels.DecisionRequest("APPROVED", ""), demoUser()))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Review not found");
     }
