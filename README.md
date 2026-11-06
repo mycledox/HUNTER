@@ -65,6 +65,70 @@ SameSite=Lax. For an HTTPS deployment, set `SESSION_COOKIE_SECURE=true` in
 `.env` and terminate TLS at a trusted reverse proxy. The Docker Compose port
 remains bound to localhost by default.
 
+## Deploy to an Ubuntu VPS with HTTPS
+
+This deployment uses Docker Compose for the app, host Nginx as the reverse
+proxy, and Certbot/Let's Encrypt for TLS. The app port stays bound to
+`127.0.0.1`; only Nginx serves the public domain.
+
+### Prepare the VPS
+
+1. Point your domain's DNS `A` record to the VPS public IPv4 address. If you
+   publish an `AAAA` record, it must point to a working IPv6 address on the VPS.
+2. In the VPS provider firewall, allow inbound TCP ports `22`, `80`, and `443`.
+   If UFW is active, allow SSH and the Nginx Full profile before enabling it.
+   Do not open port `5173` publicly.
+3. SSH into an Ubuntu VPS and install Git and Docker Compose:
+
+```bash
+sudo apt update
+sudo apt install -y git docker.io docker-compose-v2
+sudo systemctl enable --now docker
+```
+
+### Clone and issue the HTTPS certificate
+
+```bash
+git clone https://github.com/mycledox/HUNTER.git
+cd HUNTER
+sudo bash deploy/setup-ubuntu.sh app.example.com you@example.com
+```
+
+Replace the domain and email with your own. The script installs Nginx and
+Certbot, creates a private `.env` with `SESSION_COOKIE_SECURE=true`, builds and
+starts the containers, configures Nginx, requests a Let's Encrypt certificate,
+and verifies `https://app.example.com/api/health`. Certificate renewal is
+handled by Certbot's systemd timer.
+
+The certificate request succeeds only after DNS resolves to this VPS and
+ports 80/443 are reachable. If setup is interrupted, fix the reported issue
+and run the same command again. The script refuses to overwrite an unrelated
+existing Nginx site or configuration.
+
+### Update and operate
+
+After pushing changes to GitHub, update the VPS with:
+
+```bash
+cd HUNTER
+sudo bash deploy/update.sh
+```
+
+Other useful commands:
+
+```bash
+docker compose ps
+docker compose logs -f
+sudo nginx -t
+sudo certbot renew --dry-run
+```
+
+The application database and uploaded images persist in a Docker volume across
+container updates. Set up and test regular backups of that volume before
+relying on a production deployment. Keep `.env` private; never commit real
+credentials. Use a managed production database and reviewed backup/retention
+policies before storing important user data.
+
 ## Implemented workflow
 
 - Scan a product barcode with a supported device camera or enter it manually. On explicit lookup, only the barcode is sent to Open Food Facts; its community-contributed product data must be checked against the package.
